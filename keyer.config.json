@@ -1,0 +1,40 @@
+{
+ "kiosk": {
+ "topMost": true,
+ "hideCursor": false,
+ "startFullscreen": true,
+ "blockWindowsKey": true,
+ "blockAltF4": true,
+ "blockAltTab": true
+ },
+ "input": {
+ "blockAllKeysToOS": true,
+ "exitCombo": "Ctrl+Shift+Q",
+ "alsoAllowCtrlAltDelToExit": true
+ },
+ "visual": {
+ "showKeyOverlay": true,
+ "overlayFontSize":200,
+ "overlayTextColor": "#FFFFFF",
+ "overlayBackColor": "#000000",
+ "overlayBackOpacity":0.6,
+ "overlayAutoHideMs":600
+ },
+ "sound": {
+ "beepOnKey": true,
+ "beepFrequency":880,
+ "beepDurationMs":80
+ },
+ "actions": {
+ "keys": {
+ "A": { "type": "showImage", "value": "assets/a.png" },
+ "B": { "type": "playSound", "value": "assets/b.wav" }
+ },
+ "groups": {
+ "Numbers": {
+ "keys": ["D0","D1","D2","D3","D4","D5","D6","D7","D8","D9"],
+ "action": { "type": "animation", "value": "sparkles" }
+ }
+ }
+ }
+}
