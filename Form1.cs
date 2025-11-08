@@ -3,9 +3,17 @@ namespace Keyer
     public partial class Form1 : Form
     {
         private KeyerConfig _cfg = new();
-        private Label _overlay = new();
+        private Label _overlay = new(); // mostrará la combinación de salida
         private HashSet<Keys> _pressed = new();
         private string _configPath = Path.Combine(AppContext.BaseDirectory, "keyer.config.json");
+
+        private readonly Random _rng = new();
+        private Rectangle _rect;
+        private Color _rectColor = Color.Empty;
+        private bool _rectVisible = false;
+        private readonly System.Windows.Forms.Timer _rectTimer = new() { Interval =600 };
+
+        private HashSet<string> _exitTokens = new(StringComparer.OrdinalIgnoreCase);
 
         public Form1()
         {
@@ -13,16 +21,23 @@ namespace Keyer
             Load += Form1_Load;
             FormClosing += Form1_FormClosing;
             KeyPreview = true;
+            DoubleBuffered = true;
+            Paint += Form1_Paint;
+            Resize += Form1_Resize;
         }
 
         private void Form1_Load(object sender, EventArgs e)
         {
             TryLoadConfig();
+            ParseExitTokens();
             ApplyWindowMode();
             SetupOverlay();
             KeyboardHook.Start(KeyboardFilter);
             TopMost = _cfg.kiosk.topMost;
             if (_cfg.kiosk.hideCursor) Cursor.Hide(); else Cursor.Show();
+            BackColor = Color.Black; // fondo negro
+
+            _rectTimer.Tick += (_, __) => { _rectVisible = false; _rectTimer.Stop(); Invalidate(); };
         }
 
         private void Form1_FormClosing(object? sender, FormClosingEventArgs e)
@@ -43,6 +58,22 @@ namespace Keyer
             {
                 _cfg = new KeyerConfig();
             }
+            // actualizar tokens y overlay si ya está creado
+            ParseExitTokens();
+            if (_overlay != null)
+            {
+                _overlay.Text = $"Salir: {_cfg.input.exitCombo}";
+                PositionOverlayBottomLeft();
+                Invalidate();
+            }
+        }
+
+        private void ParseExitTokens()
+        {
+            _exitTokens.Clear();
+            var raw = _cfg.input.exitCombo ?? string.Empty;
+            foreach (var part in raw.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                _exitTokens.Add(part);
         }
 
         private void ApplyWindowMode()
@@ -54,93 +85,124 @@ namespace Keyer
 
         private void SetupOverlay()
         {
-            _overlay.AutoSize = false;
-            _overlay.Dock = DockStyle.Fill;
-            _overlay.TextAlign = ContentAlignment.MiddleCenter;
-            _overlay.Visible = _cfg.visual.showKeyOverlay;
-            _overlay.Font = new Font(FontFamily.GenericSansSerif, _cfg.visual.overlayFontSize, FontStyle.Bold);
-            _overlay.ForeColor = ColorTranslator.FromHtml(_cfg.visual.overlayTextColor);
-            var back = ColorTranslator.FromHtml(_cfg.visual.overlayBackColor);
-            _overlay.BackColor = Color.FromArgb((int)(_cfg.visual.overlayBackOpacity * 255), back);
+            _overlay.AutoSize = true;
+            _overlay.TextAlign = ContentAlignment.MiddleLeft;
+            _overlay.Visible = true;
+            _overlay.Font = new Font(FontFamily.GenericSansSerif,12, FontStyle.Bold);
+            _overlay.ForeColor = Color.White;
+            _overlay.BackColor = Color.Transparent;
+            _overlay.Text = $"Salir: {_cfg.input.exitCombo}";
+            _overlay.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             Controls.Add(_overlay);
+            PositionOverlayBottomLeft();
         }
 
-        private System.Windows.Forms.Timer _hideTimer = new() { Interval = 600 };
+        private void PositionOverlayBottomLeft()
+        {
+            var margin =12;
+            // Colocar en esquina inferior izquierda con margen
+            var size = TextRenderer.MeasureText(_overlay.Text, _overlay.Font);
+            _overlay.Location = new Point(margin, ClientSize.Height - size.Height - margin);
+        }
+
+        private void Form1_Resize(object? sender, EventArgs e)
+        {
+            PositionOverlayBottomLeft();
+            Invalidate();
+        }
+
+        private System.Windows.Forms.Timer _hideTimer = new() { Interval =600 }; // sin uso
 
         private bool KeyboardFilter(KeyboardHook.LowLevelKeyEvent e)
         {
-            // Track current pressed keys
             if (e.Kind == KeyboardHook.KeyEventKind.KeyDown) _pressed.Add(e.Key); else _pressed.Remove(e.Key);
-
-            // Build current modifiers + key string for exit combo
-            var combo = BuildComboString(e);
 
             if (e.Kind == KeyboardHook.KeyEventKind.KeyDown)
             {
-                if (IsExitCombo(combo))
+                if (IsExitPressed())
                 {
                     BeginInvoke(new Action(() => Close()));
-                    return true; // swallow
+                    return true; // suprimir
                 }
 
-                // Block Windows key, Alt+Tab, Alt+F4 per config (best-effort)
+                // Bloqueos (mejor esfuerzo)
                 if (_cfg.kiosk.blockWindowsKey && (e.Key == Keys.LWin || e.Key == Keys.RWin)) return true;
                 if (_cfg.kiosk.blockAltTab && e.Alt && e.Key == Keys.Tab) return true;
                 if (_cfg.kiosk.blockAltF4 && e.Alt && e.Key == Keys.F4) return true;
 
-                // Show overlay text and beep
-                if (_cfg.visual.showKeyOverlay)
-                {
-                    ShowOverlayText(combo);
-                }
+                ShowRandomRectangle();
+
                 if (_cfg.sound.beepOnKey)
                 {
                     try { Console.Beep(_cfg.sound.beepFrequency, _cfg.sound.beepDurationMs); } catch { }
                 }
             }
 
-            // If configured, block all keys from reaching OS
             if (_cfg.input.blockAllKeysToOS)
             {
-                // Allow only our exit combo to reach Close handler; but still suppress to OS
-                return true;
+                return true; // bloquear hacia el SO
             }
 
-            return false; // let OS handle
+            return false;
         }
 
-        private string BuildComboString(KeyboardHook.LowLevelKeyEvent e)
+        private bool IsExitPressed()
         {
-            var parts = new List<string>();
-            if (e.Ctrl) parts.Add("Ctrl");
-            if (e.Alt) parts.Add("Alt");
-            if (e.Shift) parts.Add("Shift");
-            if (e.Key != Keys.Menu && e.Key != Keys.ShiftKey && e.Key != Keys.ControlKey && e.Key != Keys.LWin && e.Key != Keys.RWin)
-                parts.Add(e.Key.ToString());
-            return string.Join("+", parts);
+            if (_exitTokens.Count ==0) return false;
+            // Construir tokens actuales (orden independiente)
+            var current = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // Modificadores activos
+            if (IsModifierDown(Keys.ControlKey)) current.Add("Ctrl");
+            if (IsModifierDown(Keys.ShiftKey)) current.Add("Shift");
+            if (IsModifierDown(Keys.Menu)) current.Add("Alt");
+            // Añadir teclas no modificadoras actualmente presionadas
+            foreach (var k in _pressed)
+            {
+                if (k is Keys.ControlKey or Keys.ShiftKey or Keys.Menu or Keys.LWin or Keys.RWin) continue;
+                current.Add(k.ToString());
+            }
+            // Igualdad de conjuntos
+            if (current.Count != _exitTokens.Count) return false;
+            foreach (var t in _exitTokens)
+                if (!current.Contains(t)) return false;
+            return true;
         }
 
-        private bool IsExitCombo(string combo)
+        private bool IsModifierDown(Keys key)
         {
-            // Note: Ctrl+Alt+Del cannot be intercepted by user apps; it will always be handled by the OS.
-            return string.Equals(combo, _cfg.input.exitCombo, StringComparison.OrdinalIgnoreCase);
+            return (Control.ModifierKeys & key) == key;
         }
 
-        private void ShowOverlayText(string text)
+        private void ShowRandomRectangle()
         {
-            _overlay.Text = text;
-            _overlay.Visible = true;
-            _hideTimer.Stop();
-            _hideTimer.Interval = Math.Max(100, _cfg.visual.overlayAutoHideMs);
-            _hideTimer.Tick -= HideTimer_Tick;
-            _hideTimer.Tick += HideTimer_Tick;
-            _hideTimer.Start();
+            var minSize =40;
+            var maxW = Math.Max(minSize, ClientSize.Width /2);
+            var maxH = Math.Max(minSize, ClientSize.Height /2);
+            var w = _rng.Next(minSize, Math.Max(minSize +1, maxW));
+            var h = _rng.Next(minSize, Math.Max(minSize +1, maxH));
+            var x = _rng.Next(0, Math.Max(1, ClientSize.Width - w));
+            var y = _rng.Next(0, Math.Max(1, ClientSize.Height - h));
+            _rect = new Rectangle(x, y, w, h);
+            _rectColor = Color.FromArgb(255, _rng.Next(20,236), _rng.Next(20,236), _rng.Next(20,236));
+            _rectVisible = true;
+            Invalidate();
+
+            _rectTimer.Interval = Math.Max(100, _cfg.visual.overlayAutoHideMs);
+            _rectTimer.Stop();
+            _rectTimer.Start();
         }
 
-        private void HideTimer_Tick(object? sender, EventArgs e)
+        private void Form1_Paint(object? sender, PaintEventArgs e)
         {
-            _overlay.Visible = false;
-            _hideTimer.Stop();
+            // El fondo negro ya lo pinta WinForms con BackColor
+            if (_rectVisible)
+            {
+                using var b = new SolidBrush(_rectColor);
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                e.Graphics.FillRectangle(b, _rect);
+                using var pen = new Pen(Color.FromArgb(220,0,0,0),3);
+                e.Graphics.DrawRectangle(pen, _rect);
+            }
         }
     }
 }
