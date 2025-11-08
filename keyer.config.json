@@ -27,8 +27,32 @@
  },
  "actions": {
  "keys": {
- "A": { "type": "showImage", "value": "assets/a.png" },
- "B": { "type": "playSound", "value": "assets/b.wav" }
+ "A": { "type": "showImage", "value": "https://placehold.co/800x600/223344/FFFFFF?text=A" },
+ "B": { "type": "showImage", "value": "https://placehold.co/800x600/334455/FFFFFF?text=B" },
+ "C": { "type": "showImage", "value": "https://placehold.co/800x600/445566/FFFFFF?text=C" },
+ "D": { "type": "showImage", "value": "https://placehold.co/800x600/556677/FFFFFF?text=D" },
+ "E": { "type": "showImage", "value": "https://placehold.co/800x600/667788/FFFFFF?text=E" },
+ "F": { "type": "showImage", "value": "https://placehold.co/800x600/778899/FFFFFF?text=F" },
+ "G": { "type": "showImage", "value": "https://placehold.co/800x600/8899AA/FFFFFF?text=G" },
+ "H": { "type": "showImage", "value": "https://placehold.co/800x600/99AABB/FFFFFF?text=H" },
+ "I": { "type": "showImage", "value": "https://placehold.co/800x600/AABBCD/FFFFFF?text=I" },
+ "J": { "type": "showImage", "value": "https://placehold.co/800x600/BBCCDD/FFFFFF?text=J" },
+ "K": { "type": "showImage", "value": "https://placehold.co/800x600/CCDDEE/FFFFFF?text=K" },
+ "L": { "type": "showImage", "value": "https://placehold.co/800x600/DDEEFF/FFFFFF?text=L" },
+ "M": { "type": "showImage", "value": "https://placehold.co/800x600/EEFF11/000000?text=M" },
+ "N": { "type": "showImage", "value": "https://placehold.co/800x600/FFEE22/000000?text=N" },
+ "O": { "type": "showImage", "value": "https://placehold.co/800x600/EEDD33/000000?text=O" },
+ "P": { "type": "showImage", "value": "https://placehold.co/800x600/DDCC44/000000?text=P" },
+ "Q": { "type": "showImage", "value": "https://placehold.co/800x600/CCBB55/000000?text=Q" },
+ "R": { "type": "showImage", "value": "https://placehold.co/800x600/BBAA66/000000?text=R" },
+ "S": { "type": "showImage", "value": "https://placehold.co/800x600/AA9966/000000?text=S" },
+ "T": { "type": "showImage", "value": "https://placehold.co/800x600/998866/000000?text=T" },
+ "U": { "type": "showImage", "value": "https://placehold.co/800x600/887755/FFFFFF?text=U" },
+ "V": { "type": "showImage", "value": "https://placehold.co/800x600/776644/FFFFFF?text=V" },
+ "W": { "type": "showImage", "value": "https://placehold.co/800x600/665533/FFFFFF?text=W" },
+ "X": { "type": "showImage", "value": "https://placehold.co/800x600/554422/FFFFFF?text=X" },
+ "Y": { "type": "showImage", "value": "https://placehold.co/800x600/443311/FFFFFF?text=Y" },
+ "Z": { "type": "showImage", "value": "https://placehold.co/800x600/332211/FFFFFF?text=Z" }
  },
  "groups": {
  "Numbers": {

@@ -12,8 +12,13 @@ namespace Keyer
         private Color _rectColor = Color.Empty;
         private bool _rectVisible = false;
         private readonly System.Windows.Forms.Timer _rectTimer = new() { Interval =600 };
-
         private HashSet<string> _exitTokens = new(StringComparer.OrdinalIgnoreCase);
+
+        private PictureBox _imageBox = new();
+        private readonly Dictionary<string, Image> _imageCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _remoteCacheMap = new(StringComparer.OrdinalIgnoreCase);
+        private readonly string _cacheDir = Path.Combine(AppContext.BaseDirectory, "assets", "cache");
+        private static readonly System.Net.Http.HttpClient _http = new();
 
         public Form1()
         {
@@ -24,25 +29,48 @@ namespace Keyer
             DoubleBuffered = true;
             Paint += Form1_Paint;
             Resize += Form1_Resize;
+            Directory.CreateDirectory(_cacheDir);
         }
 
-        private void Form1_Load(object sender, EventArgs e)
+        private async void Form1_Load(object sender, EventArgs e)
         {
             TryLoadConfig();
             ParseExitTokens();
             ApplyWindowMode();
             SetupOverlay();
+            SetupImageBox();
+            await PrefetchRemoteImagesAsync();
             KeyboardHook.Start(KeyboardFilter);
             TopMost = _cfg.kiosk.topMost;
             if (_cfg.kiosk.hideCursor) Cursor.Hide(); else Cursor.Show();
             BackColor = Color.Black; // fondo negro
 
-            _rectTimer.Tick += (_, __) => { _rectVisible = false; _rectTimer.Stop(); Invalidate(); };
+            _rectTimer.Tick += (_, __) => { HideVisuals(); };
         }
 
         private void Form1_FormClosing(object? sender, FormClosingEventArgs e)
         {
             KeyboardHook.Stop();
+            foreach (var kv in _imageCache) kv.Value.Dispose();
+        }
+
+        private void HideVisuals()
+        {
+            _rectVisible = false;
+            _imageBox.Visible = false;
+            _rectTimer.Stop();
+            Invalidate();
+        }
+
+        private void SetupImageBox()
+        {
+            _imageBox.Visible = false;
+            _imageBox.SizeMode = PictureBoxSizeMode.Zoom;
+            _imageBox.BackColor = Color.Transparent;
+            _imageBox.Dock = DockStyle.None; // posicionaremos manualmente
+            Controls.Add(_imageBox);
+            BringToFront();
+            _overlay.BringToFront();
         }
 
         private void TryLoadConfig()
@@ -88,7 +116,7 @@ namespace Keyer
             _overlay.AutoSize = true;
             _overlay.TextAlign = ContentAlignment.MiddleLeft;
             _overlay.Visible = true;
-            _overlay.Font = new Font(FontFamily.GenericSansSerif,12, FontStyle.Bold);
+            _overlay.Font = new Font(FontFamily.GenericSansSerif,18, FontStyle.Bold);
             _overlay.ForeColor = Color.White;
             _overlay.BackColor = Color.Transparent;
             _overlay.Text = $"Salir: {_cfg.input.exitCombo}";
@@ -111,26 +139,21 @@ namespace Keyer
             Invalidate();
         }
 
-        private System.Windows.Forms.Timer _hideTimer = new() { Interval =600 }; // sin uso
-
         private bool KeyboardFilter(KeyboardHook.LowLevelKeyEvent e)
         {
             if (e.Kind == KeyboardHook.KeyEventKind.KeyDown) _pressed.Add(e.Key); else _pressed.Remove(e.Key);
 
             if (e.Kind == KeyboardHook.KeyEventKind.KeyDown)
             {
-                if (IsExitPressed())
-                {
-                    BeginInvoke(new Action(() => Close()));
-                    return true; // suprimir
-                }
+                if (IsExitPressed()) { BeginInvoke(new Action(() => Close())); return true; }
 
                 // Bloqueos (mejor esfuerzo)
                 if (_cfg.kiosk.blockWindowsKey && (e.Key == Keys.LWin || e.Key == Keys.RWin)) return true;
                 if (_cfg.kiosk.blockAltTab && e.Alt && e.Key == Keys.Tab) return true;
                 if (_cfg.kiosk.blockAltF4 && e.Alt && e.Key == Keys.F4) return true;
 
-                ShowRandomRectangle();
+                bool showedImage = TryShowImageForKey(e.Key);
+                if (!showedImage) ShowRandomRectangle();
 
                 if (_cfg.sound.beepOnKey)
                 {
@@ -144,6 +167,131 @@ namespace Keyer
             }
 
             return false;
+        }
+
+        private bool TryShowImageForKey(Keys key)
+        {
+            string keyName = key.ToString();
+            if (_cfg.actions.keys.TryGetValue(keyName, out var action) && string.Equals(action.type, "showImage", StringComparison.OrdinalIgnoreCase))
+            {
+                var val = action.value ?? string.Empty;
+                string? chosen = null;
+                try
+                {
+                    if (LooksLikeHttpUrl(val))
+                    {
+                        if (_remoteCacheMap.TryGetValue(val, out var local) && File.Exists(local))
+                            chosen = local;
+                        // si no existe aún, prefetch está en curso; fallback
+                    }
+                    else if (Directory.Exists(val))
+                    {
+                        var files = Directory.GetFiles(val).Where(HasImageExtension).ToArray();
+                        if (files.Length >0) chosen = files[_rng.Next(files.Length)];
+                    }
+                    else if (File.Exists(val))
+                    {
+                        chosen = val;
+                    }
+                    if (chosen != null)
+                    {
+                        var img = GetCachedImage(chosen);
+                        // calcular tamaño: máximo60% de ancho/alto
+                        int maxW = (int)(ClientSize.Width *0.6);
+                        int maxH = (int)(ClientSize.Height *0.6);
+                        // ratio
+                        double rw = (double)img.Width / img.Height;
+                        int targetW = img.Width;
+                        int targetH = img.Height;
+                        if (targetW > maxW)
+                        { targetW = maxW; targetH = (int)(targetW / rw); }
+                        if (targetH > maxH)
+                        { targetH = maxH; targetW = (int)(targetH * rw); }
+                        int x = _rng.Next(0, Math.Max(1, ClientSize.Width - targetW));
+                        int y = _rng.Next(0, Math.Max(1, ClientSize.Height - targetH));
+                        _imageBox.Bounds = new Rectangle(x, y, targetW, targetH);
+                        _imageBox.Image = img;
+                        _imageBox.Visible = true;
+                        _rectVisible = false;
+                        _rectTimer.Interval = Math.Max(100, _cfg.visual.overlayAutoHideMs);
+                        _rectTimer.Stop();
+                        _rectTimer.Start();
+                        Invalidate();
+                        return true;
+                    }
+                }
+                catch { }
+            }
+            return false;
+        }
+
+        private bool HasImageExtension(string f)
+        {
+            string ext = Path.GetExtension(f).ToLowerInvariant();
+            return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".gif"; }
+
+        private Image GetCachedImage(string path)
+        {
+            if (_imageCache.TryGetValue(path, out var img)) return img;
+            var loaded = Image.FromFile(path);
+            _imageCache[path] = loaded;
+            return loaded;
+        }
+
+        private static bool LooksLikeHttpUrl(string s)
+        {
+            return s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || s.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task PrefetchRemoteImagesAsync()
+        {
+            try
+            {
+                var pairs = _cfg.actions.keys
+                    .Where(kv => string.Equals(kv.Value.type, "showImage", StringComparison.OrdinalIgnoreCase))
+                    .Select(kv => kv.Value.value)
+                    .Where(v => !string.IsNullOrWhiteSpace(v) && LooksLikeHttpUrl(v))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                foreach (var url in pairs)
+                {
+                    try
+                    {
+                        var local = await DownloadToCacheAsync(url);
+                        if (!string.IsNullOrEmpty(local))
+                            _remoteCacheMap[url] = local;
+                    }
+                    catch { /* continuar con las demás */ }
+                }
+            }
+            catch { }
+        }
+
+        private async Task<string?> DownloadToCacheAsync(string url)
+        {
+            try
+            {
+                var uri = new Uri(url);
+                string ext = Path.GetExtension(uri.LocalPath);
+                if (string.IsNullOrWhiteSpace(ext)) ext = ".jpg";
+                string fileName = SanitizeFileName(Path.GetFileNameWithoutExtension(uri.LocalPath));
+                if (string.IsNullOrEmpty(fileName)) fileName = Guid.NewGuid().ToString("N");
+                string local = Path.Combine(_cacheDir, fileName + ext);
+                if (File.Exists(local)) return local;
+                using var resp = await _http.GetAsync(uri);
+                resp.EnsureSuccessStatusCode();
+                var bytes = await resp.Content.ReadAsByteArrayAsync();
+                await File.WriteAllBytesAsync(local, bytes);
+                return local;
+            }
+            catch { return null; }
+        }
+
+        private static string SanitizeFileName(string name)
+        {
+            foreach (var c in Path.GetInvalidFileNameChars())
+                name = name.Replace(c, '_');
+            return name;
         }
 
         private bool IsExitPressed()
@@ -185,6 +333,7 @@ namespace Keyer
             _rect = new Rectangle(x, y, w, h);
             _rectColor = Color.FromArgb(255, _rng.Next(20,236), _rng.Next(20,236), _rng.Next(20,236));
             _rectVisible = true;
+            _imageBox.Visible = false;
             Invalidate();
 
             _rectTimer.Interval = Math.Max(100, _cfg.visual.overlayAutoHideMs);
