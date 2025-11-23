@@ -20,6 +20,9 @@ namespace Keyer
         private readonly string _cacheDir = Path.Combine(AppContext.BaseDirectory, "assets", "cache");
         private static readonly System.Net.Http.HttpClient _http = new();
 
+        private enum ShapeType { Rectangle, Ellipse, Triangle, Diamond, Heart }
+        private ShapeType _shapeType = ShapeType.Rectangle;
+
         public Form1()
         {
             InitializeComponent();
@@ -32,19 +35,28 @@ namespace Keyer
             Directory.CreateDirectory(_cacheDir);
         }
 
+        private void ApplyFormBackColor()
+        {
+            try
+            {
+                var c = ColorTranslator.FromHtml(_cfg.visual.formBackColor);
+                BackColor = c;
+            }
+            catch { BackColor = Color.Black; }
+        }
+
         private async void Form1_Load(object sender, EventArgs e)
         {
             TryLoadConfig();
             ParseExitTokens();
             ApplyWindowMode();
+            ApplyFormBackColor();
             SetupOverlay();
             SetupImageBox();
             await PrefetchRemoteImagesAsync();
             KeyboardHook.Start(KeyboardFilter);
             TopMost = _cfg.kiosk.topMost;
             if (_cfg.kiosk.hideCursor) Cursor.Hide(); else Cursor.Show();
-            BackColor = Color.Black; // fondo negro
-
             _rectTimer.Tick += (_, __) => { HideVisuals(); };
         }
 
@@ -88,9 +100,11 @@ namespace Keyer
             }
             // actualizar tokens y overlay si ya está creado
             ParseExitTokens();
-            if (_overlay != null)
+            ApplyFormBackColor();
+            if (_overlay != null && !_overlay.IsDisposed)
             {
                 _overlay.Text = $"Salir: {_cfg.input.exitCombo}";
+                ApplyOverlayColors();
                 PositionOverlayBottomLeft();
                 Invalidate();
             }
@@ -117,12 +131,28 @@ namespace Keyer
             _overlay.TextAlign = ContentAlignment.MiddleLeft;
             _overlay.Visible = true;
             _overlay.Font = new Font(FontFamily.GenericSansSerif,18, FontStyle.Bold);
-            _overlay.ForeColor = Color.White;
-            _overlay.BackColor = Color.Transparent;
+            ApplyOverlayColors();
             _overlay.Text = $"Salir: {_cfg.input.exitCombo}";
             _overlay.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
             Controls.Add(_overlay);
             PositionOverlayBottomLeft();
+        }
+
+        private void ApplyOverlayColors()
+        {
+            try
+            {
+                var textColor = ColorTranslator.FromHtml(_cfg.visual.overlayTextColor);
+                var backColor = ColorTranslator.FromHtml(_cfg.visual.overlayBackColor);
+                int alpha = (int)(Math.Clamp(_cfg.visual.overlayBackOpacity,0.0,1.0) *255);
+                _overlay.ForeColor = textColor;
+                _overlay.BackColor = Color.FromArgb(alpha, backColor);
+            }
+            catch
+            {
+                _overlay.ForeColor = Color.White;
+                _overlay.BackColor = Color.FromArgb(128, Color.Black);
+            }
         }
 
         private void PositionOverlayBottomLeft()
@@ -153,7 +183,7 @@ namespace Keyer
                 if (_cfg.kiosk.blockAltF4 && e.Alt && e.Key == Keys.F4) return true;
 
                 bool showedImage = TryShowImageForKey(e.Key);
-                if (!showedImage) ShowRandomRectangle();
+                if (!showedImage) ShowRandomShape();
 
                 if (_cfg.sound.beepOnKey)
                 {
@@ -321,7 +351,7 @@ namespace Keyer
             return (Control.ModifierKeys & key) == key;
         }
 
-        private void ShowRandomRectangle()
+        private void ShowRandomShape()
         {
             var minSize =40;
             var maxW = Math.Max(minSize, ClientSize.Width /2);
@@ -334,6 +364,8 @@ namespace Keyer
             _rectColor = Color.FromArgb(255, _rng.Next(20,236), _rng.Next(20,236), _rng.Next(20,236));
             _rectVisible = true;
             _imageBox.Visible = false;
+            // elegir tipo aleatorio
+            _shapeType = (ShapeType)_rng.Next(Enum.GetValues(typeof(ShapeType)).Length);
             Invalidate();
 
             _rectTimer.Interval = Math.Max(100, _cfg.visual.overlayAutoHideMs);
@@ -348,9 +380,73 @@ namespace Keyer
             {
                 using var b = new SolidBrush(_rectColor);
                 e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                e.Graphics.FillRectangle(b, _rect);
-                using var pen = new Pen(Color.FromArgb(220,0,0,0),3);
-                e.Graphics.DrawRectangle(pen, _rect);
+                int thickness = Math.Max(1, _cfg.visual.shapeBorderThickness);
+                using var penRect = new Pen(Color.FromArgb(0,0,0,0), thickness);
+                using var penEllipse = new Pen(Color.FromArgb(0,0,0,0), thickness);
+                using var penGeneric = new Pen(Color.FromArgb(0,0,0,0), thickness);
+                switch (_shapeType)
+                {
+                    case ShapeType.Rectangle:
+                        e.Graphics.FillRectangle(b, _rect);
+                        e.Graphics.DrawRectangle(penRect, _rect);
+                        break;
+                    case ShapeType.Ellipse:
+                        e.Graphics.FillEllipse(b, _rect);
+                        e.Graphics.DrawEllipse(penEllipse, _rect);
+                        break;
+                    case ShapeType.Triangle:
+                    {
+                        using var path = new System.Drawing.Drawing2D.GraphicsPath();
+                        var p1 = new Point(_rect.Left + _rect.Width /2, _rect.Top);
+                        var p2 = new Point(_rect.Left, _rect.Bottom);
+                        var p3 = new Point(_rect.Right, _rect.Bottom);
+                        path.AddPolygon(new[] { p1, p2, p3 });
+                        e.Graphics.FillPath(b, path);
+                        e.Graphics.DrawPath(penGeneric, path);
+                    }
+                    break;
+                    case ShapeType.Diamond:
+                    {
+                        using var path = new System.Drawing.Drawing2D.GraphicsPath();
+                        var p1 = new Point(_rect.Left + _rect.Width /2, _rect.Top);
+                        var p2 = new Point(_rect.Left, _rect.Top + _rect.Height /2);
+                        var p3 = new Point(_rect.Left + _rect.Width /2, _rect.Bottom);
+                        var p4 = new Point(_rect.Right, _rect.Top + _rect.Height /2);
+                        path.AddPolygon(new[] { p1, p2, p3, p4 });
+                        e.Graphics.FillPath(b, path);
+                        e.Graphics.DrawPath(penGeneric, path);
+                    }
+                    break;
+                    case ShapeType.Heart:
+                    {
+                        // Corazón aproximado con curvas Bezier dentro de _rect
+                        using var path = new System.Drawing.Drawing2D.GraphicsPath();
+                        float x = _rect.X;
+                        float y = _rect.Y;
+                        float w = _rect.Width;
+                        float h = _rect.Height;
+                        // Ajustes proporcionales
+                        // Parte superior izquierda
+                        path.StartFigure();
+                        path.AddBezier(
+                            new PointF(x + w *0.5f, y + h *0.25f), // inicio parte superior
+                            new PointF(x + w *0.15f, y), // control1
+                            new PointF(x, y + h *0.35f), // control2
+                            new PointF(x + w *0.5f, y + h *0.75f) // punto inferior central
+                        );
+                        // Parte superior derecha
+                        path.AddBezier(
+                            new PointF(x + w *0.5f, y + h *0.25f), // inicio parte superior derecha (mismo punto de inicio para continuidad visual)
+                            new PointF(x + w *0.85f, y), // control1
+                            new PointF(x + w, y + h *0.35f), // control2
+                            new PointF(x + w *0.5f, y + h *0.75f) // punto inferior central
+                        );
+                        path.CloseFigure();
+                        e.Graphics.FillPath(b, path);
+                        e.Graphics.DrawPath(penGeneric, path);
+                    }
+                    break;
+                }
             }
         }
     }
