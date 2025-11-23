@@ -48,7 +48,8 @@ namespace Keyer
  public double overlayBackOpacity { get; set; } =0.6;
  public int overlayAutoHideMs { get; set; } =600;
  public int shapeBorderThickness { get; set; } =3; // grosor borde
- public string formBackColor { get; set; } = "#000000"; // nuevo color fondo form
+ public string formBackColor { get; set; } = "#000000"; // color fondo form
+ public bool accumulateShapes { get; set; } = false; // acumular figuras
  }
  public sealed class SoundConfig
  {

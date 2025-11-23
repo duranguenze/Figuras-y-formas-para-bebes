@@ -2,99 +2,90 @@
 
 Este archivo sirve para documentar y persistir el estado operativo de la(s) IA/Agentes del proyecto.
 
-- Ultima_actualizacion:2025-11-0800:00
+- Ultima_actualizacion:2025-11-0801:30Z
 - Version_plantilla:1.0
 
 ##1. Resumen
-- Descripcion: Aplicación tipo kiosco para bebés: pantalla completa, bloquea teclado excepto combinaciones permitidas; cada tecla dispara eventos visuales/sonoros configurables por JSON.
-- Modo_actual (p.ej. planificacion/ejecucion/espera): planificacion
-- Entorno (dev/test/prod): dev
+- Descripcion: Aplicación kiosco para bebés en WinForms (.NET9) que captura teclado global, bloquea combinaciones no permitidas y muestra imágenes o figuras geométricas animadas simples; configurable vía JSON.
+- Modo_actual: construccion
+- Entorno: dev
 
 ##2. Agentes activos
 - Agente:
  - Nombre: keyer-orchestrator
- - Rol/Responsabilidad: Coordinar captura de teclado, render de overlay y ejecución de acciones por tecla
- - Version:0.1.0
+ - Rol: Captura de teclado, render de overlay, selección de acción (imagen/figura/sonido)
+ - Version:0.3.0
  - Owner: dev
- - Estado (idle/running/blocked): running
+ - Estado: running
 
 ##3. Objetivos
-- Largo_plazo: Estabilidad, seguridad de kiosk, personalización de acciones por tecla
-- Corto_plazo: Implementar modo fullscreen, captura global de teclado, lectura de `keyer.config.json`, overlay visual y beep
-- Hitos: Cargar config JSON, interceptar teclas, bloquear Alt+F4/Win, permitir salida por Ctrl+Alt+Supr y combo configurable
+- Largo_plazo: Robustez, modo kiosco endurecido, personalización avanzada (animaciones, sonidos por grupo)
+- Corto_plazo: Límite de figuras acumuladas, limpieza manual, soporte color configurable para bordes/figuras
+- Hitos alcanzados: Fullscreen, hook global, bloqueo Win/Alt+F4/Alt+Tab (best-effort), salida Escape, carga remota de imágenes, figuras avanzadas (Heart, Star, Polygon), acumulación opcional de figuras, fondo configurable.
 
 ##4. Contexto y supuestos
-- Requisitos/Restricciones: Windows, .NET9, WinForms, ejecución exclusiva a pantalla completa
-- Dependencias externas: Ninguna por ahora
-- Supuestos: Ejecución con permisos de usuario; bloqueo de WinKey/Alt+Tab tiene límites de sistema
+- Restricciones: No bloqueo total gestos touchpad sin políticas del SO.
+- Dependencias: user32.dll hook, HttpClient para descarga de imágenes.
+- Supuestos: Usuario tiene permisos para imágenes usadas.
 
 ##5. Memoria
-- Corto_plazo: Definir hooks de teclado bajo nivel y overlay
-- Largo_plazo: Persistir métricas de uso
-- Conocimiento compartido (blackboard): `keyer.config.json`
+- Corto_plazo: Añadir límite y limpieza de figuras acumuladas.
+- Largo_plazo: Persistir estadísticas de teclas pulsadas.
+- Blackboard: `keyer.config.json`
 
-##6. Variables de estado (clave-valor)
-- planning.enabled: true
-- retries.left:3
-- rate_limit.window: "1m"
+##6. Variables de estado
+- visual.accumulateShapes: true
+- overlay.exitCombo: Escape
+- shapes.supported: [Rectangle,Ellipse,Triangle,Diamond,Heart,Star,Polygon]
 
 ##7. Tareas
-- En_curso: Diseñar arquitectura de hook de teclado y manejadores
-- En_cola: Implementar lectura de config, overlay, beep, bloqueo de ventanas
-- Completadas_reciente: Crear `keyer.config.json`
+- En_curso: Diseño límite/gestión de lista de figuras acumuladas
+- En_cola: Color configurable de figura/borde; botón invisible de limpieza; métricas
+- Completadas_reciente: Integrar imágenes remotas; figuras nuevas (Heart, Star, Polygon); acumulación; fondo configurable; estrella variable; polígono5-8 lados
 
 ##8. Decisiones recientes
-- Timestamp:2025-11-08T00:00:00Z
-- Decision: Usar LowLevelKeyboardProc con SetWindowsHookEx para captura global
-- Razonamiento_resumido: Necesario para bloquear teclas especiales y generar eventos sin foco
-- Alternativas_consideradas: PreviewKeyDown solo con foco (insuficiente)
+-2025-11-08T01:15Z: Usar HttpClient y caché local para imágenes remotas -> Minimiza latencia y reuso.
+-2025-11-08T01:20Z: Representar figuras mediante lista persistente cuando accumulateShapes=true -> permite efecto visual acumulativo.
+-2025-11-08T01:25Z: Bordes transparentes (alpha0) para eliminar líneas intermedias en Bezier corazón -> mejora estética.
 
 ##9. Mensajeria
-- Inbox (entradas relevantes):
- - "Quiero generar una aplicacion que se abra a pantalla completa, bloquee el teclado con excepcion de una combinacion de teclas, el objetivo es que un bebe le puedda picar a cada tecla y se lancen eventos que sean visuales y de sonidos, cada tecla o grupo de teclas despues las configurare para que hagan una animacion o muestren una imagen, o sonido, quiero agregar un archivo de configuracion en json, la forma de salir sera configurada en ese mismo archivo, debe bloquear todo, inclusive la tecla windows, la forma de salir seria con ctrl alt supr, y tambien con una combinacion pre configurada, no debe permitir salir con alt f4 ni similares, apunta este prompt en agents"
-- Outbox (acciones/solicitudes emitidas): Crear archivo de configuración y plan de implementación
+- Inbox: Solicitud de figuras adicionales (corazón, estrella, polígono), acumulación, cambio colores overlay y fondo.
+- Outbox: Actualizaciones de config, implementación de nuevas figuras y propiedades.
 
 ##10. Recursos y artefactos
-- Datos/Archivos clave: `keyer.config.json`
-- Conexiones/Endpoints: N/A
-- Credenciales (no guardar secretos; referenciar almacen seguro): N/A
+- keyer.config.json (añadidos: formBackColor, shapeBorderThickness, accumulateShapes)
+- assets/cache (descarga remota temporal)
 
 ##11. Riesgos y bloqueos
-- Riesgos: Bloquear completamente WinKey/Alt+Tab/Task Switcher no es100% soportado por apps normales; requiere modo quiosco/DirectInput/Accesos restringidos o políticas del SO
-- Mitigaciones: Ejecutar como quiosco asignado, usar SetWindowsHookEx global, ocultar cursor, ventana top-most sin bordes
-- Bloqueos_actuales: Validar permisos y comportamiento en distintas versiones de Windows
+- Riesgo: Hook podría ser interferido por antivirus/políticas.
+- Riesgo: Descarga de imágenes externas sin verificación licencia.
+- Mitigación: Uso de placeholders; advertencia de licencias.
+- Bloqueo: Gestos del sistema (task view) no bloqueables desde app.
 
-##12. Metricas/KPIs
-- Exito_tarea (%):0
-- Latencia_media: N/A
-- Uso_memoria/CPU: N/A
-- Errores_recientes: N/A
+##12. Metricas/KPIs (pendiente de implementación)
+- total_key_presses:0
+- shapes_rendered:0
+- images_shown:0
 
 ##13. Checkpoints y snapshots
-- Ultimo_checkpoint_id: cp-2025-11-08-001
+- Ultimo_checkpoint_id: cp-2025-11-08-002
 - Snapshots:
-
-Ejemplo de snapshot (JSON):
 ```json
 {
- "id": "cp-2025-11-08-001",
- "timestamp": "2025-11-08T00:00:00Z",
- "agentes": [
- { "nombre": "keyer-orchestrator", "estado": "running", "version": "0.1.0" }
- ],
- "objetivos": { "corto_plazo": ["modo fullscreen", "hook teclado", "overlay"], "largo_plazo": ["kiosk estable"] },
- "variables": { "retries.left":3, "planning.enabled": true },
- "tareas": { "en_curso": ["diseño hook"], "en_cola": ["lectura config"], "completadas": ["crear config json"] }
+ "id": "cp-2025-11-08-002",
+ "timestamp": "2025-11-08T01:30:00Z",
+ "version_app": "0.3.0",
+ "config_flags": { "accumulateShapes": true, "exitCombo": "Escape" },
+ "shapes": ["Rectangle","Ellipse","Triangle","Diamond","Heart","Star","Polygon"],
+ "recent_decisions": ["remote_image_cache","accumulate_list","transparent_border"],
+ "completed": ["imagenes_remotas","figuras_avanzadas","acumulacion","fondo_configurable","estrella_variable","poligono_5_8"],
+ "pending": ["limite_figuras","color_figura_config","limpieza_manual","metricas"]
 }
 ```
 
 ##14. Politica de persistencia
-- Ubicacion_archivo: `agents.md` (raiz del repo)
-- Rotacion: mantener N snapshots recientes
-- Formato: Markdown con bloques JSON/YAML para estructuras
-- Seguridad: no incluir PII ni secretos; usar referencias a almacenamiento seguro
+- Rotacion: mantener últimos5 snapshots.
 
 ##15. Convenciones de edicion
-- Agregar entradas al final de cada seccion manteniendo orden cronologico
-- Usar timestamps en UTC ISO-8601
-- Revisar y actualizar `Ultima_actualizacion` en cada cambio
+- Timestamps en UTC ISO-8601.
+- Actualizar Ultima_actualizacion con cada modificación.

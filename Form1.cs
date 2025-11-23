@@ -20,8 +20,22 @@ namespace Keyer
         private readonly string _cacheDir = Path.Combine(AppContext.BaseDirectory, "assets", "cache");
         private static readonly System.Net.Http.HttpClient _http = new();
 
-        private enum ShapeType { Rectangle, Ellipse, Triangle, Diamond, Heart }
+        private enum ShapeType { Rectangle, Ellipse, Triangle, Diamond, Heart, Star, Polygon }
         private ShapeType _shapeType = ShapeType.Rectangle;
+        private int _starPoints =5; // número de puntas actual
+        private double _starInnerRatio =0.5; // relación radio interno/externo
+        private int _polygonSides =5; // lados del polígono
+
+        private class ShapeInstance
+        {
+            public ShapeType Type { get; set; }
+            public Rectangle Bounds { get; set; }
+            public Color Fill { get; set; }
+            public int StarPoints { get; set; }
+            public double StarInnerRatio { get; set; }
+            public int PolygonSides { get; set; }
+        }
+        private readonly List<ShapeInstance> _shapeInstances = new();
 
         public Form1()
         {
@@ -68,8 +82,17 @@ namespace Keyer
 
         private void HideVisuals()
         {
-            _rectVisible = false;
-            _imageBox.Visible = false;
+            if (!_cfg.visual.accumulateShapes)
+            {
+                _rectVisible = false;
+                _imageBox.Visible = false;
+                _shapeInstances.Clear();
+            }
+            else
+            {
+                // solo ocultar imagen, mantener figuras
+                _imageBox.Visible = false;
+            }
             _rectTimer.Stop();
             Invalidate();
         }
@@ -360,14 +383,36 @@ namespace Keyer
             var h = _rng.Next(minSize, Math.Max(minSize +1, maxH));
             var x = _rng.Next(0, Math.Max(1, ClientSize.Width - w));
             var y = _rng.Next(0, Math.Max(1, ClientSize.Height - h));
-            _rect = new Rectangle(x, y, w, h);
-            _rectColor = Color.FromArgb(255, _rng.Next(20,236), _rng.Next(20,236), _rng.Next(20,236));
+            var bounds = new Rectangle(x, y, w, h);
+            var color = Color.FromArgb(255, _rng.Next(20,236), _rng.Next(20,236), _rng.Next(20,236));
+            var type = (ShapeType)_rng.Next(Enum.GetValues(typeof(ShapeType)).Length);
+            int starPts=5; double starRatio=0.5; int polySides=5;
+            if (type == ShapeType.Star)
+            {
+                starPts = _rng.Next(4,7);
+                starRatio =0.35 + _rng.NextDouble()*0.25;
+            }
+            else if (type == ShapeType.Polygon)
+            {
+                polySides = _rng.Next(5,9);
+            }
+            var inst = new ShapeInstance
+            {
+                Type = type,
+                Bounds = bounds,
+                Fill = color,
+                StarPoints = starPts,
+                StarInnerRatio = starRatio,
+                PolygonSides = polySides
+            };
+            if (!_cfg.visual.accumulateShapes)
+            {
+                _shapeInstances.Clear();
+            }
+            _shapeInstances.Add(inst);
             _rectVisible = true;
             _imageBox.Visible = false;
-            // elegir tipo aleatorio
-            _shapeType = (ShapeType)_rng.Next(Enum.GetValues(typeof(ShapeType)).Length);
             Invalidate();
-
             _rectTimer.Interval = Math.Max(100, _cfg.visual.overlayAutoHideMs);
             _rectTimer.Stop();
             _rectTimer.Start();
@@ -376,76 +421,100 @@ namespace Keyer
         private void Form1_Paint(object? sender, PaintEventArgs e)
         {
             // El fondo negro ya lo pinta WinForms con BackColor
-            if (_rectVisible)
+            if (_rectVisible && _shapeInstances.Count >0)
             {
-                using var b = new SolidBrush(_rectColor);
                 e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 int thickness = Math.Max(1, _cfg.visual.shapeBorderThickness);
-                using var penRect = new Pen(Color.FromArgb(0,0,0,0), thickness);
-                using var penEllipse = new Pen(Color.FromArgb(0,0,0,0), thickness);
-                using var penGeneric = new Pen(Color.FromArgb(0,0,0,0), thickness);
-                switch (_shapeType)
+                using var pen = new Pen(Color.FromArgb(0,0,0,0), thickness);
+                foreach (var s in _shapeInstances)
                 {
-                    case ShapeType.Rectangle:
-                        e.Graphics.FillRectangle(b, _rect);
-                        e.Graphics.DrawRectangle(penRect, _rect);
+                    using var b = new SolidBrush(s.Fill);
+                    switch (s.Type)
+                    {
+                        case ShapeType.Rectangle:
+                            e.Graphics.FillRectangle(b, s.Bounds);
+                            e.Graphics.DrawRectangle(pen, s.Bounds);
+                            break;
+                        case ShapeType.Ellipse:
+                            e.Graphics.FillEllipse(b, s.Bounds);
+                            e.Graphics.DrawEllipse(pen, s.Bounds);
+                            break;
+                        case ShapeType.Triangle:
+                        {
+                            using var path = new System.Drawing.Drawing2D.GraphicsPath();
+                            var p1 = new Point(s.Bounds.Left + s.Bounds.Width /2, s.Bounds.Top);
+                            var p2 = new Point(s.Bounds.Left, s.Bounds.Bottom);
+                            var p3 = new Point(s.Bounds.Right, s.Bounds.Bottom);
+                            path.AddPolygon(new[] { p1, p2, p3 });
+                            e.Graphics.FillPath(b, path);
+                            e.Graphics.DrawPath(pen, path);
+                        }
                         break;
-                    case ShapeType.Ellipse:
-                        e.Graphics.FillEllipse(b, _rect);
-                        e.Graphics.DrawEllipse(penEllipse, _rect);
+                        case ShapeType.Diamond:
+                        {
+                            using var path = new System.Drawing.Drawing2D.GraphicsPath();
+                            var p1 = new Point(s.Bounds.Left + s.Bounds.Width /2, s.Bounds.Top);
+                            var p2 = new Point(s.Bounds.Left, s.Bounds.Top + s.Bounds.Height /2);
+                            var p3 = new Point(s.Bounds.Left + s.Bounds.Width /2, s.Bounds.Bottom);
+                            var p4 = new Point(s.Bounds.Right, s.Bounds.Top + s.Bounds.Height /2);
+                            path.AddPolygon(new[] { p1, p2, p3, p4 });
+                            e.Graphics.FillPath(b, path);
+                            e.Graphics.DrawPath(pen, path);
+                        }
                         break;
-                    case ShapeType.Triangle:
-                    {
-                        using var path = new System.Drawing.Drawing2D.GraphicsPath();
-                        var p1 = new Point(_rect.Left + _rect.Width /2, _rect.Top);
-                        var p2 = new Point(_rect.Left, _rect.Bottom);
-                        var p3 = new Point(_rect.Right, _rect.Bottom);
-                        path.AddPolygon(new[] { p1, p2, p3 });
-                        e.Graphics.FillPath(b, path);
-                        e.Graphics.DrawPath(penGeneric, path);
+                        case ShapeType.Heart:
+                        {
+                            using var path = new System.Drawing.Drawing2D.GraphicsPath();
+                            float x = s.Bounds.X;
+                            float y = s.Bounds.Y;
+                            float w = s.Bounds.Width;
+                            float h = s.Bounds.Height;
+                            path.StartFigure();
+                            path.AddBezier(new PointF(x + w *0.5f, y + h *0.25f), new PointF(x + w *0.15f, y), new PointF(x, y + h *0.35f), new PointF(x + w *0.5f, y + h *0.75f));
+                            path.AddBezier(new PointF(x + w *0.5f, y + h *0.25f), new PointF(x + w *0.85f, y), new PointF(x + w, y + h *0.35f), new PointF(x + w *0.5f, y + h *0.75f));
+                            path.CloseFigure();
+                            e.Graphics.FillPath(b, path);
+                            e.Graphics.DrawPath(pen, path);
+                        }
+                        break;
+                        case ShapeType.Star:
+                        {
+                            using var path = new System.Drawing.Drawing2D.GraphicsPath();
+                            float cx = s.Bounds.Left + s.Bounds.Width /2f;
+                            float cy = s.Bounds.Top + s.Bounds.Height /2f;
+                            float outerR = Math.Min(s.Bounds.Width, s.Bounds.Height) /2f;
+                            float innerR = outerR * (float)s.StarInnerRatio;
+                            int totalPoints = s.StarPoints *2;
+                            var pts = new PointF[totalPoints];
+                            for (int i =0; i < totalPoints; i++)
+                            {
+                                double angle = Math.PI *2 * i / totalPoints - Math.PI /2;
+                                float r = (i %2 ==0) ? outerR : innerR;
+                                pts[i] = new PointF(cx + (float)(Math.Cos(angle) * r), cy + (float)(Math.Sin(angle) * r));
+                            }
+                            path.AddPolygon(pts);
+                            e.Graphics.FillPath(b, path);
+                            e.Graphics.DrawPath(pen, path);
+                        }
+                        break;
+                        case ShapeType.Polygon:
+                        {
+                            using var path = new System.Drawing.Drawing2D.GraphicsPath();
+                            float cx = s.Bounds.Left + s.Bounds.Width /2f;
+                            float cy = s.Bounds.Top + s.Bounds.Height /2f;
+                            float radius = Math.Min(s.Bounds.Width, s.Bounds.Height) /2f;
+                            var pts = new PointF[s.PolygonSides];
+                            for (int i =0; i < s.PolygonSides; i++)
+                            {
+                                double angle = Math.PI *2 * i / s.PolygonSides - Math.PI /2;
+                                pts[i] = new PointF(cx + (float)(Math.Cos(angle) * radius), cy + (float)(Math.Sin(angle) * radius));
+                            }
+                            path.AddPolygon(pts);
+                            e.Graphics.FillPath(b, path);
+                            e.Graphics.DrawPath(pen, path);
+                        }
+                        break;
                     }
-                    break;
-                    case ShapeType.Diamond:
-                    {
-                        using var path = new System.Drawing.Drawing2D.GraphicsPath();
-                        var p1 = new Point(_rect.Left + _rect.Width /2, _rect.Top);
-                        var p2 = new Point(_rect.Left, _rect.Top + _rect.Height /2);
-                        var p3 = new Point(_rect.Left + _rect.Width /2, _rect.Bottom);
-                        var p4 = new Point(_rect.Right, _rect.Top + _rect.Height /2);
-                        path.AddPolygon(new[] { p1, p2, p3, p4 });
-                        e.Graphics.FillPath(b, path);
-                        e.Graphics.DrawPath(penGeneric, path);
-                    }
-                    break;
-                    case ShapeType.Heart:
-                    {
-                        // Corazón aproximado con curvas Bezier dentro de _rect
-                        using var path = new System.Drawing.Drawing2D.GraphicsPath();
-                        float x = _rect.X;
-                        float y = _rect.Y;
-                        float w = _rect.Width;
-                        float h = _rect.Height;
-                        // Ajustes proporcionales
-                        // Parte superior izquierda
-                        path.StartFigure();
-                        path.AddBezier(
-                            new PointF(x + w *0.5f, y + h *0.25f), // inicio parte superior
-                            new PointF(x + w *0.15f, y), // control1
-                            new PointF(x, y + h *0.35f), // control2
-                            new PointF(x + w *0.5f, y + h *0.75f) // punto inferior central
-                        );
-                        // Parte superior derecha
-                        path.AddBezier(
-                            new PointF(x + w *0.5f, y + h *0.25f), // inicio parte superior derecha (mismo punto de inicio para continuidad visual)
-                            new PointF(x + w *0.85f, y), // control1
-                            new PointF(x + w, y + h *0.35f), // control2
-                            new PointF(x + w *0.5f, y + h *0.75f) // punto inferior central
-                        );
-                        path.CloseFigure();
-                        e.Graphics.FillPath(b, path);
-                        e.Graphics.DrawPath(penGeneric, path);
-                    }
-                    break;
                 }
             }
         }
